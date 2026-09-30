@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "FunASR Realtime STT",
+        "description": "Speech-to-text for Assist, powered by FunASR models.\n\nCloud backend: Aliyun Bailian (DashScope) fun-asr-realtime streaming recognition.",
+        "data": {
+          "backend": "Backend",
+          "api_key": "API Key",
+          "workspace": "Workspace ID (optional)"
+        },
+        "data_description": {
+          "api_key": "Aliyun Bailian API key (classic sk- format, valid on dashscope.aliyuncs.com). Token-plan/MaaS endpoint keys do NOT work for the public ASR API.",
+          "workspace": "Only needed if the key belongs to a sub-workspace (llm- prefix)."
+        }
+      }
+    },
+    "error": {
+      "invalid_api_key": "API key rejected by DashScope (401/403). Note: token-plan/MaaS keys cannot access the public ASR API.",
+      "cannot_connect": "Could not reach DashScope to validate the key.",
+      "local_not_supported": "The local FunASR runtime backend is planned but not implemented yet. Please select the cloud backend."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "description": "Recognition and hotword settings.",
+        "data": {
+          "model": "Model",
+          "hotwords": "Extra hotwords (comma separated)",
+          "auto_hotwords": "Auto-collect device & area names as hotwords",
+          "vocab_prefix": "Hotword vocabulary prefix (lowercase letters/digits, <10 chars)",
+          "final_timeout": "Final result timeout (seconds)"
+        }
+      }
+    }
+  }
+}

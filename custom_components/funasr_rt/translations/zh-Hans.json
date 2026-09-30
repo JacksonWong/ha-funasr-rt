@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "FunASR 实时语音识别",
+        "description": "为 Assist 提供基于 FunASR 模型的语音转文字。\n\n云端后端：阿里云百炼（DashScope）fun-asr-realtime 流式识别。",
+        "data": {
+          "backend": "识别后端",
+          "api_key": "API Key",
+          "workspace": "业务空间 ID（可选）"
+        },
+        "data_description": {
+          "api_key": "阿里云百炼 API key（经典 sk- 格式，适用于 dashscope.aliyuncs.com）。注意：token-plan/MaaS 专用 key 无法访问公网 ASR 接口。",
+          "workspace": "仅当 key 属于子业务空间时需要（llm- 开头）。"
+        }
+      }
+    },
+    "error": {
+      "invalid_api_key": "API key 被 DashScope 拒绝（401/403）。注意：token-plan/MaaS key 不能用于公网 ASR 接口。",
+      "cannot_connect": "无法连接 DashScope 验证 key。",
+      "local_not_supported": "本地 FunASR runtime 后端尚在规划中，请先选择云端后端。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "description": "识别与热词设置。",
+        "data": {
+          "model": "模型",
+          "hotwords": "附加热词（逗号分隔）",
+          "auto_hotwords": "自动收集设备/区域名作为热词",
+          "vocab_prefix": "热词表前缀（小写字母/数字，<10 字符）",
+          "final_timeout": "等待最终结果超时（秒）"
+        }
+      }
+    }
+  }
+}

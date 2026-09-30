@@ -1,0 +1,12 @@
+{
+  "domain": "funasr_rt",
+  "name": "FunASR Realtime STT",
+  "codeowners": ["@JacksonWong"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/JacksonWong/ha-funasr-rt",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/JacksonWong/ha-funasr-rt/issues",
+  "requirements": ["dashscope==1.27.7"],
+  "version": "1.0.0"
+}

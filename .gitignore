@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+*.log
+.vocab_state.json
+wyoming-shim/samples/
+wyoming-shim/.venv/
+wyoming-shim/.env
+wyoming-shim/.vocab_state.json
+wyoming-shim/server.log
+wyoming-shim/test-server*.log

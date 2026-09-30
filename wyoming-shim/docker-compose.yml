@@ -1,0 +1,17 @@
+# 迁移到 PVE/独立 Docker 主机时使用；本机（WSL）由 systemd user service 托管
+services:
+  wyoming-funasr-shim:
+    build: .
+    image: wyoming-funasr-shim:latest
+    container_name: wyoming-funasr-shim
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      FUNASR_STATE_FILE: /app/state/.vocab_state.json
+    ports:
+      - "10300:10300"
+    volumes:
+      - vocab-state:/app/state
+
+volumes:
+  vocab-state:
