@@ -24,7 +24,11 @@ DEFAULT_FINAL_TIMEOUT = 15
 CLOUD_VALIDATE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
 
 MAX_HOTWORDS = 500
-MAX_WORD_LEN = 30
 HOTWORD_WEIGHT = 4
+
+# DashScope 热词格式硬规则（2026-09-30 实测探针验证）
+MAX_NONASCII_LEN = 15     # 含非 ASCII 的词：总长度上限
+MAX_ASCII_SEGMENTS = 7    # 纯 ASCII 词：空格分段数上限
+VOCAB_FAIL_BACKOFF = 600  # 热词表失败重试退避（秒）
 
 VOCAB_CACHE_KEY = "***"

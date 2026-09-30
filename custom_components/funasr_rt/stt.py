@@ -7,6 +7,7 @@ from collections.abc import AsyncIterable
 import hashlib
 import json
 import logging
+import time
 
 from homeassistant.components.stt import (
     AudioBitRates,
@@ -38,9 +39,11 @@ from .const import (
     DEFAULT_VOCAB_PREFIX,
     DOMAIN,
     HOTWORD_WEIGHT,
+    MAX_ASCII_SEGMENTS,
     MAX_HOTWORDS,
-    MAX_WORD_LEN,
+    MAX_NONASCII_LEN,
     VOCAB_CACHE_KEY,
+    VOCAB_FAIL_BACKOFF,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -51,6 +54,20 @@ SUPPORTED_LANGUAGES = ["zh", "zh-CN", "en", "en-US"]
 # getattr 回退兼容新旧版本
 _BIT_RATE_16 = getattr(AudioBitRates, "BITRATE_16", None) or AudioBitRates.BIT_16
 _CHANNEL_MONO = getattr(AudioChannels, "CHANNEL_MONO", None) or AudioChannels.CHANNEL_1
+
+
+def _valid_hotword(word: str) -> bool:
+    """DashScope vocabulary format rules (empirically probed 2026-09-30):
+
+    - 含非 ASCII 字符：总长度 <= 15
+    - 纯 ASCII：空格分段 <= 7
+    （emoji/括号/单字等 API 均接受；空词无意义，本地过滤）
+    """
+    if not word:
+        return False
+    if word.isascii():
+        return 1 <= len(word.split()) <= MAX_ASCII_SEGMENTS
+    return len(word) <= MAX_NONASCII_LEN
 
 
 async def async_setup_entry(
@@ -113,20 +130,28 @@ class FunAsrRtSpeechEntity(SpeechToTextEntity):
         manual = opts.get(CONF_HOTWORDS, "") or ""
         for word in manual.replace("，", ",").replace("\n", ",").split(","):
             word = word.strip()
-            if word and len(word) <= MAX_WORD_LEN:
+            if word:
                 words.add(word)
         if opts.get(CONF_AUTO_HOTWORDS, True) and self.hass is not None:
             for state in self.hass.states.async_all():
                 name = state.attributes.get(ATTR_FRIENDLY_NAME)
-                if isinstance(name, str) and name and len(name) <= MAX_WORD_LEN:
+                if isinstance(name, str) and name.strip():
                     words.add(name.strip())
             try:
                 for area in ar.async_get(self.hass).async_list_areas():
-                    if area.name and len(area.name) <= MAX_WORD_LEN:
+                    if area.name and area.name.strip():
                         words.add(area.name.strip())
             except Exception:  # noqa: BLE001
                 _LOGGER.debug("Area registry unavailable for hotwords", exc_info=True)
-        return sorted(words)[:MAX_HOTWORDS]
+        kept = sorted(w for w in words if _valid_hotword(w))
+        dropped = len(words) - len(kept)
+        if dropped:
+            _LOGGER.info(
+                "Hotwords: dropped %d invalid word(s) "
+                "(non-ASCII >15 chars or ASCII >7 segments)",
+                dropped,
+            )
+        return kept[:MAX_HOTWORDS]
 
     @staticmethod
     def _ensure_vocabulary_sync(words, api_key, workspace, prefix, model, cache):
@@ -149,22 +174,31 @@ class FunAsrRtSpeechEntity(SpeechToTextEntity):
         if vid and cache.get("hash") == digest:
             return vid
 
+        fail_ts = cache.get("fail_ts")
+        if fail_ts and (time.time() - fail_ts) < VOCAB_FAIL_BACKOFF:
+            return vid  # 失败退避期内跳过重试
+
         import dashscope  # noqa: PLC0415 (installed from manifest requirements)
         from dashscope.audio.asr import VocabularyService  # noqa: PLC0415
 
         dashscope.api_key = api_key
         svc = VocabularyService(api_key=api_key, workspace=workspace)
-        if vid:
-            svc.update_vocabulary(vid, payload)
-        else:
-            existing = svc.list_vocabularies(prefix=prefix, page_size=10)
-            if existing:
-                vid = existing[0]["vocabulary_id"]
+        try:
+            if vid:
                 svc.update_vocabulary(vid, payload)
             else:
-                vid = svc.create_vocabulary(
-                    target_model=model, prefix=prefix, vocabulary=payload
-                )
+                existing = svc.list_vocabularies(prefix=prefix, page_size=10)
+                if existing:
+                    vid = existing[0]["vocabulary_id"]
+                    svc.update_vocabulary(vid, payload)
+                else:
+                    vid = svc.create_vocabulary(
+                        target_model=model, prefix=prefix, vocabulary=payload
+                    )
+        except Exception:
+            cache["fail_ts"] = time.time()
+            raise
+        cache.pop("fail_ts", None)
         cache["id"] = vid
         cache["hash"] = digest
         cache["words"] = len(payload)
