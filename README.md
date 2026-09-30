@@ -58,7 +58,7 @@ Wyoming 协议 STT 服务，代码同源、久经实测（并发/错误路径/�
 
 ## 要求
 
-- 较新版本的 Home Assistant（使用 `SpeechToTextEntity` API；已在 HA 2026.2 / Python 3.13 通过导入校验）
+- Home Assistant 2026.4+（`SpeechToTextEntity` API；v1.0.1 针对 HAOS 2026.4.4 修复枚举改名并在同版本做属性级校验；对 2026.2 旧枚举名保留回退兼容）
 - HAOS 安装集成时自动拉取依赖 `dashscope==1.27.7`
 
 ## Roadmap

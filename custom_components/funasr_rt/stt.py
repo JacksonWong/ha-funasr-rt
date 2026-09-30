@@ -47,6 +47,11 @@ _LOGGER = logging.getLogger(__name__)
 
 SUPPORTED_LANGUAGES = ["zh", "zh-CN", "en", "en-US"]
 
+# HA 2026.4 起枚举成员改名（BIT_16→BITRATE_16、CHANNEL_1→CHANNEL_MONO），
+# getattr 回退兼容新旧版本
+_BIT_RATE_16 = getattr(AudioBitRates, "BITRATE_16", None) or AudioBitRates.BIT_16
+_CHANNEL_MONO = getattr(AudioChannels, "CHANNEL_MONO", None) or AudioChannels.CHANNEL_1
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -86,7 +91,7 @@ class FunAsrRtSpeechEntity(SpeechToTextEntity):
     @property
     def supported_bit_rates(self) -> list[AudioBitRates]:
         """Return a list of supported bit rates."""
-        return [AudioBitRates.BIT_16]
+        return [_BIT_RATE_16]
 
     @property
     def supported_sample_rates(self) -> list[AudioSampleRates]:
@@ -96,7 +101,7 @@ class FunAsrRtSpeechEntity(SpeechToTextEntity):
     @property
     def supported_channels(self) -> list[AudioChannels]:
         """Return a list of supported channels."""
-        return [AudioChannels.CHANNEL_1]
+        return [_CHANNEL_MONO]
 
     # ------------------------------------------------------------------
     # Hotwords
