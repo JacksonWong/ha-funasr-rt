@@ -6,6 +6,7 @@ DOMAIN = "funasr_rt"
 CONF_BACKEND = "backend"
 CONF_API_KEY = "***"
 CONF_WORKSPACE = "workspace"
+CONF_SERVER_URL = "server_url"  # local backend: FunASR runtime ws:// URL
 
 # Config entry options
 CONF_MODEL = "model"
@@ -15,7 +16,7 @@ CONF_VOCAB_PREFIX = "vocab_prefix"
 CONF_FINAL_TIMEOUT = "final_timeout"
 
 BACKEND_CLOUD = "cloud"
-BACKEND_LOCAL = "local"  # 预留：本地 FunASR runtime (WebSocket) 后端
+BACKEND_LOCAL = "local"  # 本地 FunASR runtime (WebSocket 2pass) 后端，v1.1.0 实现
 
 DEFAULT_MODEL = "fun-asr-realtime"
 DEFAULT_VOCAB_PREFIX = "hafunasr"
@@ -25,6 +26,10 @@ CLOUD_VALIDATE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
 
 MAX_HOTWORDS = 500
 HOTWORD_WEIGHT = 4
+
+# 本地后端 (FunASR runtime)
+LOCAL_HOTWORD_SCORE = 20    # runtime 热词权重（官方示例惯例值）
+LOCAL_CONNECT_TIMEOUT = 10  # ws 连接/接收超时（秒）
 
 # DashScope 热词格式硬规则（2026-09-30 实测探针验证）
 MAX_NONASCII_LEN = 15     # 含非 ASCII 的词：总长度上限

@@ -27,11 +27,14 @@ from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    BACKEND_LOCAL,
     CONF_API_KEY,
     CONF_AUTO_HOTWORDS,
+    CONF_BACKEND,
     CONF_FINAL_TIMEOUT,
     CONF_HOTWORDS,
     CONF_MODEL,
+    CONF_SERVER_URL,
     CONF_VOCAB_PREFIX,
     CONF_WORKSPACE,
     DEFAULT_FINAL_TIMEOUT,
@@ -39,6 +42,8 @@ from .const import (
     DEFAULT_VOCAB_PREFIX,
     DOMAIN,
     HOTWORD_WEIGHT,
+    LOCAL_CONNECT_TIMEOUT,
+    LOCAL_HOTWORD_SCORE,
     MAX_ASCII_SEGMENTS,
     MAX_HOTWORDS,
     MAX_NONASCII_LEN,
@@ -80,15 +85,22 @@ async def async_setup_entry(
 
 
 class FunAsrRtSpeechEntity(SpeechToTextEntity):
-    """Speech-to-text entity backed by FunASR realtime models (cloud: Bailian)."""
+    """Speech-to-text entity backed by FunASR models.
+
+    Backends: cloud (Bailian DashScope) or local (FunASR runtime 2pass WS).
+    """
 
     _attr_icon = "mdi:message-processing-outline"
-    _attr_name = "FunASR Realtime"
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize the entity."""
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_stt"
+        self._attr_name = (
+            "FunASR Local"
+            if entry.data.get(CONF_BACKEND) == BACKEND_LOCAL
+            else "FunASR Realtime"
+        )
 
     @property
     def supported_languages(self) -> list[str]:
@@ -209,6 +221,14 @@ class FunAsrRtSpeechEntity(SpeechToTextEntity):
     # Streaming STT
     # ------------------------------------------------------------------
     async def async_process_audio_stream(
+        self, metadata: SpeechMetadata, stream: AsyncIterable[bytes]
+    ) -> SpeechResult:
+        """Convert an audio stream to text (dispatch by configured backend)."""
+        if self._entry.data.get(CONF_BACKEND) == BACKEND_LOCAL:
+            return await self._async_process_local(metadata, stream)
+        return await self._async_process_cloud(metadata, stream)
+
+    async def _async_process_cloud(
         self, metadata: SpeechMetadata, stream: AsyncIterable[bytes]
     ) -> SpeechResult:
         """Convert an audio stream to text via DashScope realtime ASR."""
@@ -344,3 +364,143 @@ class FunAsrRtSpeechEntity(SpeechToTextEntity):
         else:
             _LOGGER.info("FunASR: empty transcript (silence?)")
         return SpeechResult(text, SpeechResultState.SUCCESS)
+
+    # ------------------------------------------------------------------
+    # Local backend: FunASR runtime (2pass WebSocket)
+    # ------------------------------------------------------------------
+    async def _async_process_local(
+        self, metadata: SpeechMetadata, stream: AsyncIterable[bytes]
+    ) -> SpeechResult:
+        """Convert an audio stream to text via a local FunASR runtime server.
+
+        Protocol (FunASR runtime 2pass WebSocket, verified against
+        funasr-runtime-sdk-online-cpu-0.1.13):
+          1. meta JSON first (mode/chunk_size/audio_fs/hotwords/is_speaking)
+          2. binary PCM frames as they arrive (server buffers itself)
+          3. end with {"is_speaking": false, "is_end": true}
+          4. server replies 2pass-online partials and corrected 2pass-offline
+             finals; the last message carries is_final=true. The runtime
+             sends no is_end ack and never closes first - the client closes.
+        """
+        import aiohttp  # noqa: PLC0415 (HA core dependency, always present)
+
+        opts = self._entry.options
+        server_url = self._entry.data[CONF_SERVER_URL]
+        timeout = float(opts.get(CONF_FINAL_TIMEOUT, DEFAULT_FINAL_TIMEOUT))
+
+        words = self._collect_words()
+        meta = {
+            "mode": "2pass",
+            "chunk_size": [5, 10, 5],
+            "chunk_interval": 10,
+            "encoder_chunk_look_back": 4,
+            "decoder_chunk_look_back": 0,
+            "audio_fs": int(metadata.sample_rate),
+            "wav_name": "ha-funasr-rt",
+            "wav_format": "pcm",
+            "is_speaking": True,
+            "itn": True,
+        }
+        if words:
+            meta["hotwords"] = json.dumps(
+                {w: LOCAL_HOTWORD_SCORE for w in words}, ensure_ascii=False
+            )
+
+        finals: list[str] = []
+        last_online = ""
+        got_final = False
+        error: str | None = None
+
+        async def _drain(ws) -> bool:
+            """Collect results until final ack/close; False on receive timeout."""
+            nonlocal last_online
+            while True:
+                try:
+                    msg = await ws.receive(timeout=timeout)
+                except asyncio.TimeoutError:
+                    return False
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    try:
+                        data = json.loads(msg.data)
+                    except ValueError:
+                        continue
+                    mode = data.get("mode") or ""
+                    text = data.get("text") or ""
+                    if text:
+                        if mode == "2pass-offline":
+                            finals.append(text)
+                        elif mode == "2pass-online":
+                            last_online = text
+                    # only meaningful after end-of-speech; harmless mid-stream
+                    # since the runtime sets it solely on the final message
+                    if data.get("is_final") or data.get("is_end"):
+                        return True
+                elif msg.type in (
+                    aiohttp.WSMsgType.CLOSE,
+                    aiohttp.WSMsgType.CLOSING,
+                    aiohttp.WSMsgType.CLOSED,
+                ):
+                    return True
+                elif msg.type == aiohttp.WSMsgType.ERROR:
+                    raise RuntimeError(f"websocket error: {ws.exception()}")
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                ws = await session.ws_connect(
+                    server_url, timeout=LOCAL_CONNECT_TIMEOUT, max_msg_size=0
+                )
+                try:
+                    await ws.send_str(json.dumps(meta, ensure_ascii=False))
+                    first = True
+                    async for chunk in stream:
+                        if not chunk:
+                            continue
+                        if first:
+                            first = False
+                            chunk = _strip_wav_header(chunk)
+                            if not chunk:
+                                continue
+                        await ws.send_bytes(chunk)
+                    await ws.send_str(
+                        json.dumps({"is_speaking": False, "is_end": True})
+                    )
+                    got_final = await _drain(ws)
+                finally:
+                    await ws.close()
+        except Exception as err:  # noqa: BLE001
+            error = f"{type(err).__name__}: {err}"
+
+        if error:
+            _LOGGER.error("FunASR local session error: %s", error)
+            return SpeechResult(None, SpeechResultState.ERROR)
+
+        text = "".join(finals)
+        if not text and last_online:
+            if got_final:
+                _LOGGER.warning(
+                    "no 2pass-offline result; falling back to last online partial"
+                )
+                text = last_online
+            else:
+                _LOGGER.error("FunASR local: no final result within %.0fs", timeout)
+                return SpeechResult(None, SpeechResultState.ERROR)
+        if not text:
+            _LOGGER.info("FunASR local: empty transcript (silence?)")
+        else:
+            _LOGGER.debug("FunASR local transcript: %s", text)
+        return SpeechResult(text, SpeechResultState.SUCCESS)
+
+
+def _strip_wav_header(chunk: bytes) -> bytes:
+    """Drop a leading RIFF/WAVE header so the runtime receives raw PCM.
+
+    HA negotiates WAV format with STT entities; the FunASR runtime expects
+    headerless PCM s16le. A stray header would decode as a harmless ~1ms
+    click, but stripping keeps VAD clean.
+    """
+    if not chunk.startswith(b"RIFF"):
+        return chunk
+    idx = chunk.find(b"data", 12)
+    if idx == -1:
+        return chunk
+    return chunk[idx + 8 :]

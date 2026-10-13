@@ -8,5 +8,5 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/JacksonWong/ha-funasr-rt/issues",
   "requirements": ["dashscope==1.27.7"],
-  "version": "1.0.2"
+  "version": "1.1.0"
 }
